@@ -20,11 +20,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          submodules: false
-
-      - name: Init CUE4Parse submodule
-        shell: bash
-        run: git submodule update --init external/CUE4Parse
+          # Changed to true to ensure all dependencies are pulled
+          submodules: true 
 
       - name: Set up .NET
         uses: actions/setup-dotnet@v4
@@ -35,4 +32,12 @@ jobs:
         run: dotnet restore UnrealReZen/UnrealReZen.csproj
 
       - name: Build
-        run: dotnet build UnrealReZen/UnrealReZen.csproj --no-restore --configuration Release
+        # Using 'publish' instead of 'build' creates a cleaner folder for the .exe
+        run: dotnet publish UnrealReZen/UnrealReZen.csproj -c Release -r win-x64 --self-contained /p:PublishSingleFile=true /p:PublishReadyToRun=true
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: UnrealReZen-Windows
+          # Path to where dotnet publish puts the exe
+          path: UnrealReZen/bin/Release/net8.0/win-x64/publish/

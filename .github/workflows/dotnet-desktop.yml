@@ -22,6 +22,11 @@ jobs:
         with:
           # Changed to true to ensure all dependencies are pulled
           submodules: true 
+          
+      - name: Force Latest Submodules
+        # This tells GitHub to ignore the "pointing" hash and grab the newest code
+        run: |
+          git submodule update --init --recursive --remote external/CUE4Parse
 
       - name: Set up .NET
         uses: actions/setup-dotnet@v4

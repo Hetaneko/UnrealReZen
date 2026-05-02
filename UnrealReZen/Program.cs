@@ -239,9 +239,6 @@ namespace UnrealReZen
                 }
                 // === End Mappings Load ===
 
-                // Load localization AFTER mappings so cultures can be parsed correctly
-                provider.LoadLocalization(ELanguage.English);
-
                 if (provider.RequiredKeys.Count > 0 && provider.Keys.Count == 0)
                 {
                     Log.Fatal("Some archives require an AES key. Please provide --aes-key.");

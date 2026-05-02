@@ -3,6 +3,7 @@ using CommandLine.Text;
 using CUE4Parse.Compression;
 using CUE4Parse.Encryption.Aes;
 using CUE4Parse.FileProvider;
+using CUE4Parse.MappingsProvider; // Added for UsmapTypeMappingsProvider
 using CUE4Parse.UE4.IO;
 using CUE4Parse.UE4.IO.Objects;
 using CUE4Parse.UE4.Objects.Core.Misc;
@@ -18,38 +19,37 @@ namespace UnrealReZen
     {
         [Option('g', "game-dir", Required = true, HelpText = "Path to the game directory (for loading UCAS and UTOC files).")]
         public required string GameDirectory { get; set; }
-    
+
         [Option('c', "content-path", Required = true, HelpText = "Path of the content that you want to pack.")]
         public required string ContentPath { get; set; }
-    
+
         [Option('e', "engine-version", Required = true, HelpText = "Unreal Engine version (e.g., GAME_UE4_0).")]
         public required string EngineVersion { get; set; }
-    
+
         [Option('o', "output-path", Required = true, HelpText = "Path (including file name) for the packed utoc file.")]
         public required string OutputPath { get; set; }
-    
+
         [Option('a', "aes-key", Required = false, HelpText = "AES key for reading the game's encrypted source archives.")]
         public string? AESKey { get; set; }
-    
-        // ADD THIS NEW OPTION FOR MAPPINGS
-        [Option('m', "mappings", Required = false, HelpText = "Path to .usmap file or folder containing it. If omitted, will try to auto-detect.")]
+
+        [Option('m', "mappings", Required = false, HelpText = "Path to .usmap file or directory containing it. Auto-detects if omitted.")]
         public string? MappingsPath { get; set; }
-    
+
         [Option("encrypt-output", Required = false, Default = false, HelpText = "Encrypt the generated .ucas with the game's AES key.")]
         public bool EncryptOutput { get; set; }
-    
+
         [Option("compression-format", Required = false, Default = "Zlib", HelpText = "Compression format (None, Zlib, Oodle, LZ4).")]
         public string CompressionFormat { get; set; } = "Zlib";
-    
+
         [Option("mount-point", Required = false, Default = "../../../", HelpText = "Mount point of packed archive")]
         public string MountPoint { get; set; } = "../../../";
-    
+
         [Option("container-id", Required = false, HelpText = "Container Id of packed archive (default is a random 8-byte number)")]
         public ulong? ContainerId { get; set; }
-    
+
         [Option("game-dir-top-only", Required = false, Default = false, HelpText = "When enabled, restricts the game directory search to the top-level only.")]
         public bool GameDirTopOnly { get; set; }
-    
+
         [Usage(ApplicationAlias = "UnrealReZen.exe")]
         public static IEnumerable<Example> Examples => [
             new("Making a patch for a ue5 game", new Options
@@ -165,7 +165,7 @@ namespace UnrealReZen
         {
             if (!Constants.CompressionTypes.Contains(opts.CompressionFormat.ToLowerInvariant()))
             {
-                Log.Fatal($"Unsupported compression format : {opts.CompressionFormat}");
+                Log.Fatal($"Unsupported compression format: {opts.CompressionFormat}");
                 return false;
             }
             if (!string.Equals(Path.GetExtension(opts.OutputPath), ".utoc", StringComparison.OrdinalIgnoreCase))
@@ -182,6 +182,8 @@ namespace UnrealReZen
             Console.WriteLine($"Content Path: {opts.ContentPath}");
             Console.WriteLine($"Unreal Engine Version: {engineVersion}");
             Console.WriteLine($"Output Path: {opts.OutputPath}");
+            if (!string.IsNullOrWhiteSpace(opts.MappingsPath))
+                Console.WriteLine($"Mappings Path: {opts.MappingsPath}");
         }
 
         private static bool TryLoadProvider(Options opts, EGame engineVersion, FAesKey aesKey, out DefaultFileProvider provider)
@@ -193,45 +195,41 @@ namespace UnrealReZen
                 provider = new DefaultFileProvider(opts.GameDirectory, searchOption, new VersionContainer(engineVersion), StringComparer.OrdinalIgnoreCase);
                 provider.Initialize();
                 provider.SubmitKey(new FGuid(), aesKey);
-        
-                // --- START: Load Mappings (Critical for UE5.3+ / NTE) ---
-                if (!string.IsNullOrWhiteSpace(opts.MappingsPath))
+
+                // --- Load USMAP Mappings (Required for UE5.3+) ---
+                string? usmapPath = opts.MappingsPath;
+                if (!string.IsNullOrWhiteSpace(usmapPath))
                 {
-                    if (File.Exists(opts.MappingsPath) || Directory.Exists(opts.MappingsPath))
+                    if (Directory.Exists(usmapPath))
                     {
-                        Log.Information($"Loading mappings from: {opts.MappingsPath}");
-                        provider.LoadMappings(opts.MappingsPath);
+                        usmapPath = Directory.EnumerateFiles(usmapPath, "*.usmap", SearchOption.AllDirectories).FirstOrDefault();
+                        if (usmapPath == null)
+                            Log.Warning($"No .usmap file found in mappings path '{opts.MappingsPath}'.");
                     }
-                    else
+                    else if (!File.Exists(usmapPath))
                     {
-                        Log.Warning($"Mappings path '{opts.MappingsPath}' not found. Localization may fail.");
+                        Log.Warning($"Mappings file '{usmapPath}' not found.");
+                        usmapPath = null;
                     }
                 }
                 else
                 {
-                    // Auto-detect .usmap in game directory if not specified
-                    try
-                    {
-                        var usmapFile = Directory.EnumerateFiles(opts.GameDirectory, "*.usmap", SearchOption.AllDirectories).FirstOrDefault();
-                        if (!string.IsNullOrEmpty(usmapFile))
-                        {
-                            Log.Information($"Auto-detected mappings: {usmapFile}");
-                            provider.LoadMappings(usmapFile);
-                        }
-                        else
-                        {
-                            Log.Warning("No .usmap file found. Asset parsing may fail for UE5.4+.");
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        Log.Debug($"Failed to auto-detect mappings: {ex.Message}");
-                    }
+                    // Auto-detect in game directory if not specified
+                    usmapPath = Directory.EnumerateFiles(opts.GameDirectory, "*.usmap", SearchOption.AllDirectories).FirstOrDefault();
+                    if (usmapPath != null)
+                        Log.Information($"Auto-detected mappings: {usmapPath}");
                 }
-                // --- END: Load Mappings ---
-        
+
+                if (usmapPath != null && File.Exists(usmapPath))
+                {
+                    Log.Information($"Loading USMAP: {usmapPath}");
+                    // Assign directly to MappingsContainer instead of calling LoadMappings()
+                    provider.MappingsContainer = new UsmapTypeMappingsProvider(usmapPath);
+                }
+                // ------------------------------------------------
+
                 provider.LoadLocalization(ELanguage.English);
-        
+
                 if (provider.RequiredKeys.Count > 0 && provider.Keys.Count == 0)
                 {
                     Log.Fatal("Some archives require an AES key. Please provide --aes-key.");
@@ -242,7 +240,7 @@ namespace UnrealReZen
             catch (Exception ex)
             {
                 Log.Fatal("Error: " + ex);
-                Log.Information("Maybe changing aes key, engine version, or providing --mappings helps.");
+                Log.Information("Maybe changing aes key, engine version, or providing --mappings helps");
                 provider = null!;
                 return false;
             }

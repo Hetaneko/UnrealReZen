@@ -3,7 +3,7 @@ using CommandLine.Text;
 using CUE4Parse.Compression;
 using CUE4Parse.Encryption.Aes;
 using CUE4Parse.FileProvider;
-using CUE4Parse.MappingsProvider;
+using CUE4Parse.MappingsProvider; // Required for FileUsmapTypeMappingsProvider
 using CUE4Parse.UE4.IO;
 using CUE4Parse.UE4.IO.Objects;
 using CUE4Parse.UE4.Objects.Core.Misc;
@@ -32,7 +32,7 @@ namespace UnrealReZen
         [Option('a', "aes-key", Required = false, HelpText = "AES key for reading the game's encrypted source archives.")]
         public string? AESKey { get; set; }
 
-        [Option('m', "mappings", Required = false, HelpText = "Path to .usmap file or directory containing it. Auto-detects if omitted.")]
+        [Option('m', "mappings", Required = false, HelpText = "Path to .usmap file. Auto-detects in game dir if omitted.")]
         public string? MappingsPath { get; set; }
 
         [Option("encrypt-output", Required = false, Default = false, HelpText = "Encrypt the generated .ucas with the game's AES key.")]
@@ -195,44 +195,53 @@ namespace UnrealReZen
                 provider = new DefaultFileProvider(opts.GameDirectory, searchOption, new VersionContainer(engineVersion), StringComparer.OrdinalIgnoreCase);
                 provider.Initialize();
                 provider.SubmitKey(new FGuid(), aesKey);
-    
-                // --- Load USMAP Mappings (Required for UE5.3+) ---
-                string? usmapPath = opts.MappingsPath;
-                
-                // 1. Resolve the path (handle directory or file input)
-                if (!string.IsNullOrWhiteSpace(usmapPath))
+
+                // === Load USMAP Mappings (FModel-style) ===
+                string? usmapPath = null;
+
+                // 1. Use CLI-provided path if specified
+                if (!string.IsNullOrWhiteSpace(opts.MappingsPath))
                 {
-                    if (Directory.Exists(usmapPath))
+                    if (File.Exists(opts.MappingsPath))
                     {
-                        usmapPath = Directory.EnumerateFiles(usmapPath, "*.usmap", SearchOption.AllDirectories).FirstOrDefault();
-                        if (usmapPath == null)
-                            Log.Warning($"No .usmap file found in mappings path '{opts.MappingsPath}'.");
+                        usmapPath = opts.MappingsPath;
                     }
-                    else if (!File.Exists(usmapPath))
+                    else if (Directory.Exists(opts.MappingsPath))
                     {
-                        Log.Warning($"Mappings file '{usmapPath}' not found.");
-                        usmapPath = null;
+                        // If a directory was provided, find the first .usmap file
+                        usmapPath = Directory.EnumerateFiles(opts.MappingsPath, "*.usmap", SearchOption.AllDirectories).FirstOrDefault();
+                        if (usmapPath == null)
+                            Log.Warning($"No .usmap file found in mappings directory '{opts.MappingsPath}'");
+                    }
+                    else
+                    {
+                        Log.Warning($"Mappings path '{opts.MappingsPath}' does not exist");
                     }
                 }
-                else
+
+                // 2. Auto-detect in game directory if not specified via CLI
+                if (string.IsNullOrWhiteSpace(usmapPath))
                 {
-                    // 2. Auto-detect if not specified via CLI
                     usmapPath = Directory.EnumerateFiles(opts.GameDirectory, "*.usmap", SearchOption.AllDirectories).FirstOrDefault();
                     if (usmapPath != null)
                         Log.Information($"Auto-detected mappings: {usmapPath}");
                 }
-    
-                // 3. Load the mappings using the concrete class
-                if (usmapPath != null && File.Exists(usmapPath))
+
+                // 3. Load mappings using FileUsmapTypeMappingsProvider (concrete implementation)
+                if (!string.IsNullOrWhiteSpace(usmapPath) && File.Exists(usmapPath))
                 {
                     Log.Information($"Loading USMAP: {usmapPath}");
-                    // CHANGE HERE: Use FileUsmapTypeMappingsProvider
                     provider.MappingsContainer = new FileUsmapTypeMappingsProvider(usmapPath);
                 }
-                // ------------------------------------------------
-    
+                else
+                {
+                    Log.Warning("No .usmap file found. UE5.3+ asset serialization may fail.");
+                }
+                // === End Mappings Load ===
+
+                // Load localization AFTER mappings so cultures can be parsed correctly
                 provider.LoadLocalization(ELanguage.English);
-    
+
                 if (provider.RequiredKeys.Count > 0 && provider.Keys.Count == 0)
                 {
                     Log.Fatal("Some archives require an AES key. Please provide --aes-key.");

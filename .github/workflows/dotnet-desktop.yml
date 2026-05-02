@@ -29,12 +29,16 @@ jobs:
           git submodule update --init --recursive --remote external/CUE4Parse
 
       - name: Patch CUE4Parse Culture Crash
+        shell: bash
         run: |
-          # Use sed to comment out the throw line in InternationalizationDictionary.cs
-          sed -i "s/throw new KeyNotFoundException(\$'\".*\" is not a valid culture.');/\/\/ throw new KeyNotFoundException(\$'\".*\" is not a valid culture.');/" external/CUE4Parse/CUE4Parse/FileProvider/InternationalizationDictionary.cs
+          # Path to the file in the submodule
+          FILE_PATH="external/CUE4Parse/CUE4Parse/FileProvider/InternationalizationDictionary.cs"
           
-          # Verification (Optional: prints the line to logs to make sure it worked)
-          grep "is not a valid culture" external/CUE4Parse/CUE4Parse/FileProvider/InternationalizationDictionary.cs
+          # Use sed to comment out the specific throw line
+          sed -i 's/throw new KeyNotFoundException($"'\''.*'\'' is not a valid culture.");/\/\/ throw new KeyNotFoundException($"'\''.*'\'' is not a valid culture.");/' "$FILE_PATH"
+          
+          # Verify the change in the logs
+          grep "is not a valid culture" "$FILE_PATH"
 
       - name: Set up .NET
         uses: actions/setup-dotnet@v4

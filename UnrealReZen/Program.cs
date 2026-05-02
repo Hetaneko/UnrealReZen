@@ -3,7 +3,7 @@ using CommandLine.Text;
 using CUE4Parse.Compression;
 using CUE4Parse.Encryption.Aes;
 using CUE4Parse.FileProvider;
-using CUE4Parse.MappingsProvider; // Added for UsmapTypeMappingsProvider
+using CUE4Parse.MappingsProvider;
 using CUE4Parse.UE4.IO;
 using CUE4Parse.UE4.IO.Objects;
 using CUE4Parse.UE4.Objects.Core.Misc;
@@ -195,9 +195,11 @@ namespace UnrealReZen
                 provider = new DefaultFileProvider(opts.GameDirectory, searchOption, new VersionContainer(engineVersion), StringComparer.OrdinalIgnoreCase);
                 provider.Initialize();
                 provider.SubmitKey(new FGuid(), aesKey);
-
+    
                 // --- Load USMAP Mappings (Required for UE5.3+) ---
                 string? usmapPath = opts.MappingsPath;
+                
+                // 1. Resolve the path (handle directory or file input)
                 if (!string.IsNullOrWhiteSpace(usmapPath))
                 {
                     if (Directory.Exists(usmapPath))
@@ -214,22 +216,23 @@ namespace UnrealReZen
                 }
                 else
                 {
-                    // Auto-detect in game directory if not specified
+                    // 2. Auto-detect if not specified via CLI
                     usmapPath = Directory.EnumerateFiles(opts.GameDirectory, "*.usmap", SearchOption.AllDirectories).FirstOrDefault();
                     if (usmapPath != null)
                         Log.Information($"Auto-detected mappings: {usmapPath}");
                 }
-
+    
+                // 3. Load the mappings using the concrete class
                 if (usmapPath != null && File.Exists(usmapPath))
                 {
                     Log.Information($"Loading USMAP: {usmapPath}");
-                    // Assign directly to MappingsContainer instead of calling LoadMappings()
-                    provider.MappingsContainer = new UsmapTypeMappingsProvider(usmapPath);
+                    // CHANGE HERE: Use FileUsmapTypeMappingsProvider
+                    provider.MappingsContainer = new FileUsmapTypeMappingsProvider(usmapPath);
                 }
                 // ------------------------------------------------
-
+    
                 provider.LoadLocalization(ELanguage.English);
-
+    
                 if (provider.RequiredKeys.Count > 0 && provider.Keys.Count == 0)
                 {
                     Log.Fatal("Some archives require an AES key. Please provide --aes-key.");
